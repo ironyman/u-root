@@ -73,26 +73,23 @@ func linuxModeToMode(m uint64) (os.FileMode, error) {
 	return 0, fmt.Errorf("Invalid file type %#o", m&modeTypeMask)
 }
 
-func CreateFile(f Record) error {
+func CreateFile(r Record) error {
+	return CreateFileInRoot(r, "/")
+}
+
+func CreateFileInRoot(f Record, rootDir string) error {
 	m, err := linuxModeToMode(f.Mode)
 	if err != nil {
 		return err
 	}
 
-	dir, _ := filepath.Split(f.Name)
-	// The problem: many cpio archives do not specify the directories
-	// and hence the permissions. They just specify the whole path.
-	// In order to create files in these directories, we have to make them at least
-	// mode 755.
-	if dir != "" {
-		switch m {
-		case os.FileMode(0),
-			os.ModeDevice,
-			os.ModeCharDevice,
-			os.ModeSymlink:
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return err
-			}
+	dir := filepath.Join(rootDir, filepath.Dir(f.Name))
+	// Many cpio archives do not specify the directories and hence the
+	// permissions. They just specify the whole path.  In order to create
+	// files in these directories, we have to make them at least mode 755.
+	if _, err := os.Stat(dir); os.IsNotExist(err) && dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
 		}
 	}
 
@@ -137,7 +134,7 @@ func CreateFile(f Record) error {
 		return os.Symlink(string(content), f.Name)
 
 	default:
-		return fmt.Errorf("%v: Unknown type %#o", f.Name, m)
+		return fmt.Errorf("%v: unknown file type %#o", f.Name, m)
 	}
 }
 
