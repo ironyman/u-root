@@ -39,21 +39,21 @@ func copyToFile(r io.Reader) (*os.File, error) {
 	return f, nil
 }
 
-func attemptDHCPLease(iface netlink.Link, timeout time.Duration, retry int) dhclient.Packet {
+func attemptDHCPLease(iface netlink.Link, timeout time.Duration, retry int) (dhclient.Packet, error) {
 	if _, err := dhclient.IfUp(iface.Attrs().Name); err != nil {
-		return nil
+		return nil, err
 	}
 
 	client, err := dhclient.NewV4(iface, timeout, retry)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 
 	p, err := client.Solicit()
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return p
+	return p, nil
 }
 
 func Netboot() error {
@@ -69,9 +69,9 @@ func Netboot() error {
 		}
 
 		log.Printf("Attempting to get DHCP lease on %s", iface.Attrs().Name)
-		packet := attemptDHCPLease(iface, 30*time.Second, 5)
-		if packet == nil {
-			log.Printf("No lease on %s", iface.Attrs().Name)
+		packet, err := attemptDHCPLease(iface, 30*time.Second, 5)
+		if packet == nil || err != nil {
+			log.Printf("No lease on %s: %v", iface.Attrs().Name, err)
 			continue
 		}
 		log.Printf("Got lease on %s", iface.Attrs().Name)
