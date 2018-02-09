@@ -158,7 +158,11 @@ func NewTFTPClient(c *tftp.Client) FileScheme {
 
 // GetFile implements FileScheme.GetFile.
 func (t *TFTPClient) GetFile(u *url.URL) (io.Reader, error) {
-	r, err := t.c.Get(u.String())
+	c, err := tftp.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("tftp.NewClient failed: %v", err)
+	}
+	r, err := c.Get(u.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to get %q: %v", u, err)
 	}
