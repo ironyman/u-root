@@ -121,26 +121,28 @@ func TestWget(t *testing.T) {
 	}()
 
 	for i, tt := range tests {
-		args := append(tt.flags, fmt.Sprintf(tt.url, port, unusedPort))
-		_, err := testutil.Command(t, args...).Output()
+		t.Run(fmt.Sprintf("test%d", i), func(t *testing.T) {
+			args := append(tt.flags, fmt.Sprintf(tt.url, port, unusedPort))
+			_, err := testutil.Command(t, args...).Output()
 
-		// Check return code.
-		if err := testutil.IsExitCode(err, tt.retCode); err != nil {
-			t.Error(err)
-		}
-
-		if tt.content != "" {
-			fileName := filepath.Base(tt.url)
-			content, err := ioutil.ReadFile(fileName)
-			if err != nil {
-				t.Errorf("%d. File %s was not created: %v", i, fileName, err)
+			// Check return code.
+			if err := testutil.IsExitCode(err, tt.retCode); err != nil {
+				t.Error(err)
 			}
 
-			// Check content.
-			if string(content) != tt.content {
-				t.Errorf("%d. Want:\n%#v\nGot:\n%#v", i, tt.content, string(content))
+			if len(tt.content) > 0 {
+				fileName := filepath.Base(tt.url)
+				content, err := ioutil.ReadFile(fileName)
+				if err != nil {
+					t.Errorf("File %s was not created: %v", fileName, err)
+				}
+
+				// Check content.
+				if string(content) != tt.content {
+					t.Errorf("got:\n%#v\nwant:\n%#v", string(content), tt.content)
+				}
 			}
-		}
+		})
 	}
 }
 

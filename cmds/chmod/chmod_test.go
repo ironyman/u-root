@@ -9,71 +9,54 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/u-root/u-root/pkg/testutil"
 )
 
-func run(c *exec.Cmd) (string, string, error) {
-	var o, e bytes.Buffer
-	c.Stdout, c.Stderr = &o, &e
-	err := c.Run()
-	return o.String(), e.String(), err
-}
-
-func TestChmodSimple(t *testing.T) {
-	// Temporary directories.
-	tempDir, err := ioutil.TempDir("", "TestChmodSimple")
+func TestChmod(t *testing.T) {
+	tempDir, err := ioutil.TempDir("", "chmod")
 	if err != nil {
-		t.Fatalf("cannot create temporary directory: %v", err)
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	f, err := ioutil.TempFile(tempDir, "BLAH1")
+	// Set up single file for simple test.
+	f, err := ioutil.TempFile(tempDir, "chmod-tmp-test")
 	if err != nil {
-		t.Fatalf("cannot create temporary file: %v", err)
+		t.Fatal(err)
 	}
 	defer f.Close()
 
-	for _, perm := range []os.FileMode{0777, 0644} {
-		// Set permissions using chmod.
-		c := testutil.Command(t, fmt.Sprintf("%0o", perm), f.Name())
-		c.Run()
-
-		// Check that it worked.
-		info, err := os.Stat(f.Name())
-		if err != nil {
-			t.Fatalf("stat(%q) failed: %v", f.Name(), err)
-		}
-		if got := info.Mode().Perm(); got != perm {
-			t.Errorf("Wrong file permissions on %q: got %0o, want %0o", f.Name(), got, perm)
-		}
-	}
-}
-
-func checkPath(t *testing.T, path string, want os.FileMode) {
-	info, err := os.Stat(path)
+	// Set up single file for simple test.
+	f2, err := ioutil.TempFile(tempDir, "chmod-tmp-test")
 	if err != nil {
-		t.Fatalf("stat(%q) failed: %v", path, err)
+		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != want {
-		t.Fatalf("Wrong file permissions on file %q: got %0o, want %0o",
-			path, got, want)
-	}
-}
-func TestChmodRecursive(t *testing.T) {
-	// Temporary directories.
-	tempDir, err := ioutil.TempDir("", "TestChmodRecursive")
-	if err != nil {
-		t.Fatalf("cannot create temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	defer f2.Close()
 
-	var targetFiles []string
-	var targetDirectories []string
-	for _, dir := range []string{"L1_A", "L1_B", "L1_C",
+	file0544, err := ioutil.TempFile(tempDir, "file0544")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file0544.Close()
+	if err := os.Chmod(file0544.Name(), 0544); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up complicated directory structure for recursive test.
+	recDir, err := ioutil.TempDir(tempDir, "recursive")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recursives := []string{recDir}
+	for _, dir := range []string{
+		"L1_A",
+		"L1_B",
+		"L1_C",
 		filepath.Join("L1_A", "L2_A"),
 		filepath.Join("L1_A", "L2_B"),
 		filepath.Join("L1_A", "L2_C"),
@@ -84,141 +67,84 @@ func TestChmodRecursive(t *testing.T) {
 		filepath.Join("L1_C", "L2_B"),
 		filepath.Join("L1_C", "L2_C"),
 	} {
-		dir = filepath.Join(tempDir, dir)
-		err := os.Mkdir(dir, os.FileMode(0700))
-		if err != nil {
+		dir = filepath.Join(recDir, dir)
+		if err := os.MkdirAll(dir, os.FileMode(0700)); err != nil {
 			t.Fatalf("cannot create test directory: %v", err)
 		}
-		targetDirectories = append(targetDirectories, dir)
-		targetFile, err := os.Create(filepath.Join(dir, "X"))
-		if err != nil {
-			t.Fatalf("cannot create temporary file: %v", err)
-		}
-		targetFiles = append(targetFiles, targetFile.Name())
-
+		recursives = append(recursives, dir)
 	}
 
-	// Build chmod binary.
-	for _, perm := range []os.FileMode{0707, 0770} {
-		// Set target file permissions using chmod.
-		c := testutil.Command(t,
-			"-R",
-			fmt.Sprintf("%0o", perm),
-			tempDir)
-		c.Run()
+	for i, tt := range []struct {
+		args   []string
+		stderr string
 
-		// Check that it worked.
-		for _, dir := range targetDirectories {
-			checkPath(t, dir, perm)
-		}
-	}
-}
-
-func TestChmodReference(t *testing.T) {
-	// Temporary directories.
-	tempDir, err := ioutil.TempDir("", "TestChmodReference")
-	if err != nil {
-		t.Fatalf("cannot create temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	sourceFile, err := ioutil.TempFile(tempDir, "BLAH1")
-	if err != nil {
-		t.Fatalf("cannot create temporary file: %v", err)
-	}
-	defer sourceFile.Close()
-
-	targetFile, err := ioutil.TempFile(tempDir, "BLAH2")
-	if err != nil {
-		t.Fatalf("cannot create temporary file: %v", err)
-	}
-	defer targetFile.Close()
-
-	for _, perm := range []os.FileMode{0777, 0644} {
-		os.Chmod(sourceFile.Name(), perm)
-
-		// Set target file permissions using chmod.
-		c := testutil.Command(t,
-			"--reference",
-			sourceFile.Name(),
-			targetFile.Name())
-		c.Run()
-
-		// Check that it worked.
-		info, err := os.Stat(targetFile.Name())
-		if err != nil {
-			t.Fatalf("stat(%q) failed: %v", targetFile.Name(), err)
-		}
-		if got := info.Mode().Perm(); got != perm {
-			t.Fatalf("Wrong file permissions on file %q: got %0o, want %0o",
-				targetFile.Name(), got, perm)
-		}
-	}
-}
-
-func TestInvocationErrors(t *testing.T) {
-	tempDir, err := ioutil.TempDir("", "TestInvocationErrors")
-	if err != nil {
-		t.Fatalf("cannot create temporary directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	f, err := ioutil.TempFile(tempDir, "BLAH1")
-	if err != nil {
-		t.Fatalf("cannot create temporary file: %v", err)
-	}
-	defer f.Close()
-
-	for _, v := range []struct {
-		args     []string
-		want     string
-		skipTo   int
-		skipFrom int
+		// fileList is the list of files that wantMode should be set on
+		// after calling chmod.
+		fileList []string
+		wantMode os.FileMode
 	}{
-
 		{
-			args:     []string{f.Name()},
-			want:     "Usage",
-			skipTo:   0,
-			skipFrom: len("Usage"),
+			args:     []string{"0777", f.Name()},
+			fileList: []string{f.Name()},
+			wantMode: 0777,
 		},
 		{
-			args:     []string{""},
-			want:     "Usage",
-			skipTo:   0,
-			skipFrom: len("Usage"),
+			args:     []string{"0644", f.Name()},
+			fileList: []string{f.Name()},
+			wantMode: 0644,
 		},
 		{
-			args:     []string{"01777", f.Name()},
-			want:     "Invalid octal value 1777. Value should be less than or equal to 0777.\n",
-			skipTo:   20,
-			skipFrom: -1,
+			args:     []string{"-R", "0707", recDir},
+			fileList: recursives,
+			wantMode: 0707,
 		},
 		{
-			args:     []string{"0abas", f.Name()},
-			want:     "Unable to decode mode \"0abas\". Please use an octal value: strconv.ParseUint: parsing \"0abas\": invalid syntax\n",
-			skipTo:   20,
-			skipFrom: -1,
+			args:     []string{"-R", "0770", recDir},
+			fileList: recursives,
+			wantMode: 0770,
 		},
 		{
-			args:     []string{"0777", "blah1234"},
-			want:     "chmod blah1234: no such file or directory\n",
-			skipTo:   20,
-			skipFrom: -1,
+			args:     []string{"--reference", file0544.Name(), f2.Name()},
+			fileList: []string{f2.Name()},
+			wantMode: 0544,
+		},
+		{
+			args:   []string{"01777", f.Name()},
+			stderr: "invalid octal value 1777: value should be less than or equal to 0777",
+		},
+		{
+			args:   []string{"0abas", f.Name()},
+			stderr: "unable to decode mode \"0abas\": must use an octal value: strconv.ParseUint: parsing \"0abas\": invalid syntax",
+		},
+		{
+			args:   []string{"0777", "blah1234"},
+			stderr: "chmod blah1234: no such file or directory",
 		},
 	} {
-		cmd := testutil.Command(t, v.args...)
-		_, stderr, err := run(cmd)
-		if v.skipFrom == -1 {
-			v.skipFrom = len(stderr)
-		}
-		// Ignore the date and time because we're using Log.Fatalf
-		if got := stderr[v.skipTo:v.skipFrom]; got != v.want {
-			t.Errorf("Chmod for %q failed: got %q, want %q", v.args, got, v.want)
-		}
-		if err == nil {
-			t.Errorf("Chmod for %q failed: got nil want err", v.args)
-		}
+		t.Run(fmt.Sprintf("test%d", i), func(t *testing.T) {
+			cmd := testutil.Command(t, tt.args...)
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			cmd.Run()
+
+			if e := stderr.String(); !strings.Contains(e, tt.stderr) {
+				t.Errorf("chmod(%v) = %v, stderr %v", tt.args, e, tt.stderr)
+			}
+
+			for _, file := range tt.fileList {
+				checkPath(t, file, tt.wantMode)
+			}
+		})
+	}
+}
+
+func checkPath(t *testing.T, path string, want os.FileMode) {
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat(%q) failed: %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("Wrong file permissions on file %q: got %0o, want %0o", path, got, want)
 	}
 }
 

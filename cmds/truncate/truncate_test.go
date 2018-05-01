@@ -15,81 +15,102 @@ import (
 )
 
 var truncateTests = []struct {
-	flags           []string
-	ret             int   // -1 for an expected error
-	genFile         bool  // if set, a temporary file will be created before the test (used for -c)
-	fileExistsAfter bool  // if set, we expect that the file will exist after the test
-	size            int64 // -1 to signal we don't care for size test, early continue
-	initSize        int64 // only used when genFile is true
+	name  string
+	flags []string
+
+	// Exit status of the truncate process.
+	ret int
+
+	// if set, a temporary file will be created before the test (used for -c)
+	genFile bool
+
+	// if set, we expect that the file will exist after the test
+	fileExistsAfter bool
+
+	// -1 to signal we don't care for size test, early continue
+	size int64
+
+	// only used when genFile is true
+	initSize int64
 }{
 	{
-		// Without args
+		name:  "Without args",
 		flags: []string{},
-		ret:   -1,
-	}, {
-		// Invalid, valid args, but -s is missing
+		ret:   1,
+	},
+	{
+		name:  "Invalid, valid args, but -s is missing",
 		flags: []string{"-c"},
-		ret:   -1,
-	}, {
-		// Invalid, invalid flag
+		ret:   1,
+	},
+	{
+		name:  "Invalid, invalid flag",
 		flags: []string{"-x"},
-		ret:   -1,
-	}, {
-		// Valid, file does not exist
+		ret:   2,
+	},
+	{
+		name:            "Valid, file does not exist",
 		flags:           []string{"-s", "0"},
 		ret:             0,
 		genFile:         false,
 		fileExistsAfter: true,
 		size:            0,
-	}, {
-		// Valid, file does exist and is smaller
+	},
+	{
+		name:            "Valid, file does exist and is smaller",
 		flags:           []string{"-s", "1"},
 		ret:             0,
 		genFile:         true,
 		fileExistsAfter: true,
 		initSize:        0,
 		size:            1,
-	}, {
-		// Valid, file does exist and is bigger
+	},
+	{
+		name:            "Valid, file does exist and is bigger",
 		flags:           []string{"-s", "1"},
 		ret:             0,
 		genFile:         true,
 		fileExistsAfter: true,
 		initSize:        2,
 		size:            1,
-	}, {
-		// Valid, file does exist grow
+	},
+	{
+		name:            "Valid, file does exist grow",
 		flags:           []string{"-s", "+3K"},
 		ret:             0,
 		genFile:         true,
 		fileExistsAfter: true,
 		initSize:        2,
 		size:            2 + 3*1024,
-	}, {
-		// Valid, file does exist shrink
+	},
+	{
+		name:            "Valid, file does exist shrink",
 		flags:           []string{"-s", "-3"},
 		ret:             0,
 		genFile:         true,
 		fileExistsAfter: true,
 		initSize:        5,
 		size:            2,
-	}, {
-		// Valid, file does exist shrink lower than 0
+	},
+	{
+		name:            "Valid, file does exist shrink lower than 0",
 		flags:           []string{"-s", "-3M"},
 		ret:             0,
 		genFile:         true,
 		fileExistsAfter: true,
 		initSize:        2,
 		size:            0,
-	}, {
-		// Weird GNU behavior that this actual error is ignored
+	},
+	{
+		name:            "Weird GNU behavior that this actual error is ignored",
 		flags:           []string{"-c", "-s", "2"},
 		ret:             0,
 		genFile:         false,
 		fileExistsAfter: false,
 		size:            -1,
-	}, {
-		// Existing one
+	},
+	{
+		name:            "Existing one",
 		flags:           []string{"-c", "-s", "3"},
 		ret:             0,
 		genFile:         true,
@@ -108,35 +129,32 @@ func TestTruncate(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	for i, test := range truncateTests {
-		testfile := filepath.Join(tmpDir, fmt.Sprintf("txt%d", i))
-		if test.genFile {
-			data := make([]byte, test.initSize)
-			if err := ioutil.WriteFile(testfile, data, 0600); err != nil {
-				t.Errorf("Failed to create test file %s: %v", testfile, err)
-				continue
+		t.Run(test.name, func(t *testing.T) {
+			testfile := filepath.Join(tmpDir, fmt.Sprintf("txt%d", i))
+			if test.genFile {
+				data := make([]byte, test.initSize)
+				if err := ioutil.WriteFile(testfile, data, 0600); err != nil {
+					t.Fatal(err)
+				}
 			}
-		}
-		// Execute truncate.go
-		cmd := testutil.Command(t, append(test.flags, testfile)...)
-		err := cmd.Run()
-		if err != nil {
-			if test.ret == 0 {
-				t.Fatalf("Truncate exited with error: %v, but return code %d expected\n", err, test.ret)
-			} else if test.ret == -1 { // expected error, nothing more to see
-				continue
+
+			cmd := testutil.Command(t, append(test.flags, testfile)...)
+			if err := testutil.IsExitCode(cmd.Run(), test.ret); err != nil {
+				t.Fatal(err)
 			}
-			t.Fatalf("Truncate exited with error: %v, test specified: %d, something is terribly wrong\n", err, test.ret)
-		}
-		if test.size == -1 {
-			continue
-		}
-		st, err := os.Stat(testfile)
-		if err != nil && test.fileExistsAfter {
-			t.Fatalf("Expected %s to exist, but os.Stat() retuned error: %v\n", testfile, err)
-		}
-		if s := st.Size(); s != test.size {
-			t.Fatalf("Expected that %s has size: %d, but it has size: %d\n", testfile, test.size, s)
-		}
+
+			st, err := os.Stat(testfile)
+			if err != nil && test.fileExistsAfter {
+				t.Fatalf("Expected %s to exist, but os.Stat() retuned error: %v\n", testfile, err)
+			}
+
+			if err != nil {
+				return
+			}
+			if s := st.Size(); test.size != -1 && s != test.size {
+				t.Fatalf("Expected that %s has size: %d, but it has size: %d\n", testfile, test.size, s)
+			}
+		})
 	}
 }
 

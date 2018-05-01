@@ -5,6 +5,7 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -13,74 +14,64 @@ import (
 	"github.com/u-root/u-root/pkg/testutil"
 )
 
-var tests = []struct {
-	flags []string
-	out   string
-}{
-	{
-		flags: []string{},
-		out: `d1
-f1
-f2
-f3?line 2
-`,
-	}, {
-		flags: []string{"-Q"},
-		out: `"d1"
-"f1"
-"f2"
-"f3\nline 2"
-`,
-	}, {
-		flags: []string{"-R"},
-		out: `d1
-d1/f4
-f1
-f2
-f3?line 2
-`,
-	}, {
-		flags: []string{"-a"},
-		out: `.
-.f4
-d1
-f1
-f2
-f3?line 2
-`,
-	},
-}
-
-func TestLs(t *testing.T) {
+func TestLS(t *testing.T) {
 	tmpDir, err := ioutil.TempDir("", "ls")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Create an empty directory.
-	testDir := filepath.Join(tmpDir, "testDir")
-	os.Mkdir(testDir, 0700)
-
 	// Create some files.
-	os.Create(filepath.Join(testDir, "f1"))
-	os.Create(filepath.Join(testDir, "f2"))
-	os.Create(filepath.Join(testDir, "f3\nline 2"))
-	os.Create(filepath.Join(testDir, ".f4"))
-	os.Mkdir(filepath.Join(testDir, "d1"), 0740)
-	os.Create(filepath.Join(testDir, "d1/f4"))
+	os.Create(filepath.Join(tmpDir, "f1"))
+	os.Create(filepath.Join(tmpDir, "f2"))
+	os.Create(filepath.Join(tmpDir, "f3\nline 2"))
+	os.Create(filepath.Join(tmpDir, ".f4"))
+	os.Mkdir(filepath.Join(tmpDir, "d1"), 0740)
+	os.Create(filepath.Join(tmpDir, "d1/f4"))
 
 	// Table-driven testing
-	for _, tt := range tests {
-		c := testutil.Command(t, tt.flags...)
-		c.Dir = testDir
-		out, err := c.Output()
-		if err != nil {
-			t.Error(err)
-		}
-		if string(out) != tt.out {
-			t.Errorf("got:\n%s\nwant:\n%s", string(out), tt.out)
-		}
+	for i, tt := range []struct {
+		args []string
+		out  string
+		wd   string
+	}{
+		{
+			args: []string{},
+			wd:   tmpDir,
+			out:  "d1\nf1\nf2\nf3?line 2\n",
+		}, {
+			args: []string{"-Q"},
+			wd:   tmpDir,
+			out: `"d1"
+"f1"
+"f2"
+"f3\nline 2"
+`,
+		}, {
+			args: []string{"-R"},
+			wd:   tmpDir,
+			out:  "d1\nd1/f4\nf1\nf2\nf3?line 2\n",
+		}, {
+			args: []string{"-a"},
+			wd:   tmpDir,
+			out:  ".\n.f4\nd1\nf1\nf2\nf3?line 2\n",
+		}, {
+			args: []string{tmpDir},
+			wd:   filepath.Join(tmpDir, "d1"),
+			out:  "d1\nf1\nf2\nf3?line 2\n",
+		},
+	} {
+		t.Run(fmt.Sprintf("test%d", i), func(t *testing.T) {
+			c := testutil.Command(t, tt.args...)
+			c.Dir = tt.wd
+			out, err := c.Output()
+			if err != nil {
+				t.Error(err)
+			}
+			if string(out) != tt.out {
+				t.Errorf("got:\n%s\nwant:\n%s", string(out), tt.out)
+			}
+		})
 	}
 }
 

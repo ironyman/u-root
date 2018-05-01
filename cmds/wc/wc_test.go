@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -13,36 +14,50 @@ import (
 	"github.com/u-root/u-root/pkg/testutil"
 )
 
-func TestWc(t *testing.T) {
-	var tab = []struct {
-		i string
-		o string
-		s int
-		a []string
-	}{
-		{"simple test count words", "4\n", 0, []string{"-w"}}, // don't fail more
-		{"lines\nlines\n", "2\n", 0, []string{"-l"}},
-		{"count chars\n", "12\n", 0, []string{"-c"}},
-	}
-
-	tmpDir, err := ioutil.TempDir("", "TestWc")
+func TestWC(t *testing.T) {
+	tmpDir, err := ioutil.TempDir("", "wc")
 	if err != nil {
-		t.Fatal("TempDir failed: ", err)
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	for _, v := range tab {
-		c := testutil.Command(t, v.a...)
-		c.Stdin = bytes.NewReader([]byte(v.i))
-		o, err := c.CombinedOutput()
-		if err := testutil.IsExitCode(err, v.s); err != nil {
-			t.Error(err)
-			continue
-		}
-		if string(o) != v.o {
-			t.Errorf("Wc %v < %v: want '%v', got '%v'", v.a, v.i, v.o, string(o))
-			continue
-		}
+	for i, tt := range []struct {
+		in       string
+		out      string
+		exitCode int
+		args     []string
+	}{
+		{
+			in:       "simple test count words",
+			out:      "4\n",
+			exitCode: 0,
+			args:     []string{"-w"},
+		},
+		{
+			in:       "lines\nlines\n",
+			out:      "2\n",
+			exitCode: 0,
+			args:     []string{"-l"},
+		},
+		{
+			in:       "count chars\n",
+			out:      "12\n",
+			exitCode: 0,
+			args:     []string{"-c"},
+		},
+	} {
+		t.Run(fmt.Sprintf("test%d", i), func(t *testing.T) {
+			c := testutil.Command(t, tt.args...)
+			c.Stdin = bytes.NewReader([]byte(tt.in))
+
+			o, err := c.CombinedOutput()
+			if err := testutil.IsExitCode(err, tt.exitCode); err != nil {
+				t.Fatal(err)
+			}
+			if out := string(o); out != tt.out {
+				t.Errorf("wc %v < %v = %v, want %v", tt.args, tt.in, out, tt.out)
+			}
+		})
 	}
 }
 

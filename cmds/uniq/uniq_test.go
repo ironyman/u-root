@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -15,23 +16,8 @@ import (
 
 func TestUniq(t *testing.T) {
 	var (
-		input1 string = "test\ntest\ngo\ngo\ngo\ncoool\ncoool\ncool\nlegaal\ntest\n"
-		input2 string = "u-root\nuniq\nron\nron\nteam\nbinaries\ntest\n\n\n\n\n\n"
-		tab           = []struct {
-			i string
-			o string
-			s int
-			a []string
-		}{
-			{input1, "test\ngo\ncoool\ncool\nlegaal\ntest\n", 0, nil},
-			{input1, "2\ttest\n3\tgo\n2\tcoool\n1\tcool\n1\tlegaal\n1\ttest\n", 0, []string{"-c"}},
-			{input1, "cool\nlegaal\ntest\n", 0, []string{"-u"}},
-			{input1, "test\ngo\ncoool\n", 0, []string{"-d"}},
-			{input2, "u-root\nuniq\nron\nteam\nbinaries\ntest\n\n", 0, nil},
-			{input2, "1\tu-root\n1\tuniq\n2\tron\n1\tteam\n1\tbinaries\n1\ttest\n5\t\n", 0, []string{"-c"}},
-			{input2, "u-root\nuniq\nteam\nbinaries\ntest\n", 0, []string{"-u"}},
-			{input2, "ron\n\n", 0, []string{"-d"}},
-		}
+		put1 string = "test\ntest\ngo\ngo\ngo\ncoool\ncoool\ncool\nlegaal\ntest\n"
+		put2 string = "u-root\nuniq\nron\nron\nteam\nbinaries\ntest\n\n\n\n\n\n"
 	)
 
 	tmpDir, err := ioutil.TempDir("", "UniqTest")
@@ -40,18 +26,71 @@ func TestUniq(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	for _, v := range tab {
-		c := testutil.Command(t, v.a...)
-		c.Stdin = bytes.NewReader([]byte(v.i))
-		o, err := c.CombinedOutput()
-		if err := testutil.IsExitCode(err, v.s); err != nil {
-			t.Error(err)
-			continue
-		}
-		if string(o) != v.o {
-			t.Errorf("Uniq %v < %v: want '%v', got '%v'", v.a, v.i, v.o, string(o))
-			continue
-		}
+	for i, tt := range []struct {
+		in       string
+		out      string
+		exitCode int
+		args     []string
+	}{
+		{
+			in:       put1,
+			out:      "test\ngo\ncoool\ncool\nlegaal\ntest\n",
+			exitCode: 0,
+		},
+		{
+			in:       put1,
+			out:      "2\ttest\n3\tgo\n2\tcoool\n1\tcool\n1\tlegaal\n1\ttest\n",
+			exitCode: 0,
+			args:     []string{"-c"},
+		},
+		{
+			in:       put1,
+			out:      "cool\nlegaal\ntest\n",
+			exitCode: 0,
+			args:     []string{"-u"},
+		},
+		{
+			in:       put1,
+			out:      "test\ngo\ncoool\n",
+			exitCode: 0,
+			args:     []string{"-d"},
+		},
+		{
+			in:       put2,
+			out:      "u-root\nuniq\nron\nteam\nbinaries\ntest\n\n",
+			exitCode: 0,
+		},
+		{
+			in:       put2,
+			out:      "1\tu-root\n1\tuniq\n2\tron\n1\tteam\n1\tbinaries\n1\ttest\n5\t\n",
+			exitCode: 0,
+			args:     []string{"-c"}},
+		{
+			in:       put2,
+			out:      "u-root\nuniq\nteam\nbinaries\ntest\n",
+			exitCode: 0,
+			args:     []string{"-u"},
+		},
+		{
+			in:       put2,
+			out:      "ron\n\n",
+			exitCode: 0,
+			args:     []string{"-d"},
+		},
+	} {
+		t.Run(fmt.Sprintf("test%d", i), func(t *testing.T) {
+			c := testutil.Command(t, tt.args...)
+			c.Stdin = bytes.NewReader([]byte(tt.in))
+
+			o, err := c.CombinedOutput()
+			if err := testutil.IsExitCode(err, tt.exitCode); err != nil {
+				t.Fatal(err)
+			}
+
+			if string(o) != tt.out {
+				t.Errorf("uniq %v < %v: got %v, want %v", tt.args, tt.in, string(o), tt.out)
+			}
+		})
 	}
 }
 

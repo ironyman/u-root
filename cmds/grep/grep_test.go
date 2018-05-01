@@ -6,6 +6,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -13,40 +14,59 @@ import (
 	"github.com/u-root/u-root/pkg/testutil"
 )
 
-// GrepTest is a table-driven which spawns grep with a variety of options and inputs.
-// We need to look at any output data, as well as exit status for things like the -q switch.
+// GrepTest is a table-driven which spawns grep with a variety of options and
+// inputs.  We need to look at any output data, as well as exit status for
+// things like the -q switch.
 func TestGrep(t *testing.T) {
-	var tab = []struct {
-		i string
-		o string
-		s int
-		a []string
-	}{
-		// BEWARE: the IO package seems to want this to be newline terminated.
-		// If you just use hix with no newline the test will fail. Yuck.
-		{"hix\n", "hix\n", 0, []string{"."}},
-		{"hix\n", "", 0, []string{"-q", "."}},
-		{"hix\n", "", 1, []string{"-q", "hox"}},
-	}
-
-	tmpDir, err := ioutil.TempDir("", "TestGrep")
+	tmpDir, err := ioutil.TempDir("", "grep")
 	if err != nil {
-		t.Fatal("TempDir failed: ", err)
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	for _, v := range tab {
-		c := testutil.Command(t, v.a...)
-		c.Stdin = bytes.NewReader([]byte(v.i))
-		o, err := c.CombinedOutput()
-		if err := testutil.IsExitCode(err, v.s); err != nil {
-			t.Error(err)
-			continue
-		}
-		if string(o) != v.o {
-			t.Errorf("Grep %v < %v: want '%v', got '%v'", v.a, v.i, v.o, string(o))
-			continue
-		}
+	for i, tt := range []struct {
+		in       string
+		out      string
+		exitCode int
+		args     []string
+	}{
+		// BEWARE: the IO package seems to want this to be newline terminated.
+		// If you just use hix with no newline the test will fail. Yuck.
+		// TODO: Then don't use the IO package.
+		//
+		// TODO: yeesh. more, and better test cases.
+		{
+			in:       "hix\n",
+			out:      "hix\n",
+			exitCode: 0,
+			args:     []string{"."},
+		},
+		{
+			in:       "hix\n",
+			out:      "",
+			exitCode: 0,
+			args:     []string{"-q", "."},
+		},
+		{
+			in:       "hix\n",
+			out:      "",
+			exitCode: 1,
+			args:     []string{"-q", "hox"},
+		},
+	} {
+		t.Run(fmt.Sprintf("test%d", i), func(t *testing.T) {
+			c := testutil.Command(t, tt.args...)
+			c.Stdin = bytes.NewReader([]byte(tt.in))
+
+			o, err := c.CombinedOutput()
+			if err := testutil.IsExitCode(err, tt.exitCode); err != nil {
+				t.Fatal(err)
+			}
+
+			if string(o) != tt.out {
+				t.Errorf("grep %v < %v = %v, want %v", tt.args, tt.in, string(o), tt.out)
+			}
+		})
 	}
 }
 
