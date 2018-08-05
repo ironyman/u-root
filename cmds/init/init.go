@@ -53,17 +53,13 @@ var (
 )
 
 func main() {
-	a := []string{"build"}
 	flag.Parse()
 	log.Printf("Welcome to u-root")
 	util.Rootfs()
 
 	if *verbose {
 		debug = log.Printf
-		a = append(a, "-x")
 	}
-
-	// populate buildbin
 
 	// In earlier versions we just had src/cmds. Due to the Go rules it seems we need to
 	// embed the URL of the repo everywhere. Yuck.
@@ -77,22 +73,6 @@ func main() {
 	}
 	c = append(c, o...)
 
-	envs = os.Environ()
-	debug("envs %v", envs)
-
-	os.Setenv("GOBIN", "/buildbin")
-	a = append(a, "-o", "/buildbin/installcommand", filepath.Join(util.CmdsPath, "installcommand"))
-	cmd := exec.Command("go", a...)
-	cmd.Env = append(envs, "GOBIN=/buildbin")
-	cmd.Dir = "/"
-	cmd.Stdin = os.Stdin
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	debug("Run %v", cmd)
-	if err := cmd.Run(); err != nil {
-		log.Printf("%v\n", err)
-	}
-
 	// Before entering an interactive shell, decrease the loglevel because
 	// spamming non-critical logs onto the shell frustrates users. The logs
 	// are still accessible through dmesg.
@@ -102,9 +82,10 @@ func main() {
 		log.Print("Could not set log level")
 	}
 
+	envs = os.Environ()
+	debug("envs %v", envs)
+
 	// install /env.
-	os.Setenv("GOBIN", "/ubin")
-	envs = append(envs, "GOBIN=/ubin")
 	for _, e := range envs {
 		nv := strings.SplitN(e, "=", 2)
 		if len(nv) < 2 {
@@ -160,7 +141,6 @@ func main() {
 	}
 
 	osInitGo()
-	// If the os-specific runner failed, we can just keep going.
 
 	for _, v := range cmdList {
 		if _, err := os.Stat(v); os.IsNotExist(err) {
@@ -193,7 +173,7 @@ func main() {
 		}
 
 		cmdCount++
-		cmd = exec.Command(v)
+		cmd := exec.Command(v)
 		cmd.Env = envs
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 		if *test {
