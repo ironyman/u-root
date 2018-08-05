@@ -78,18 +78,6 @@ func main() {
 		log.Printf("Your filepath glob for other commands seems busted: %v", err)
 	}
 	c = append(c, o...)
-	for _, v := range c {
-		name := filepath.Base(v)
-		if name == "installcommand" || name == "init" {
-			continue
-		} else {
-			destPath := filepath.Join("/buildbin", name)
-			source := "/buildbin/installcommand"
-			if err := os.Symlink(source, destPath); err != nil {
-				log.Printf("Symlink %v -> %v failed; %v", source, destPath, err)
-			}
-		}
-	}
 
 	envs = os.Environ()
 	debug("envs %v", envs)
