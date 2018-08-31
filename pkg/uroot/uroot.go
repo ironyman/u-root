@@ -61,12 +61,13 @@ type Commands struct {
 	// Builder is the Go compiler mode.
 	Builder builder.Builder
 
-	// Packages are the Go packages to add to the archive.
+	// Packages are the Go packages to compile and add to the archive.
 	//
 	// Currently allowed formats:
-	//   Go package imports; e.g. github.com/u-root/u-root/cmds/ls
-	//   Paths to Go package directories; e.g. $GOPATH/src/github.com/u-root/u-root/cmds/ls
-	//   Globs of paths to Go package directories; e.g. ./cmds/*
+	// - Go package imports; e.g. github.com/u-root/u-root/cmds/ls
+	// - Globs of Go package imports; e.g. github.com/u-root/u-root/cmds/*
+	// - Paths to Go package directories; e.g. $GOPATH/src/github.com/u-root/u-root/cmds/ls
+	// - Globs of paths to Go package directories; e.g. ./cmds/*
 	Packages []string
 
 	// BinaryDir is the directory in which the resulting binaries are
@@ -286,10 +287,11 @@ func ResolvePackagePaths(env golang.Environ, pkgs []string) ([]string, error) {
 	return importPaths, nil
 }
 
-// ParseExtraFiles adds files from the extraFiles list to the archive, as
-// parsed from the following formats:
+// ParseExtraFiles adds files from the extraFiles list to the archive.
 //
-// - hostPath:archivePath adds the file from hostPath at the relative archivePath in the archive.
+// The following formats are allowed in the extraFiles list:
+// - hostPath:archivePath adds the file from hostPath at the relative
+//   archivePath in the archive.
 // - justAPath is added to the archive under justAPath.
 //
 // ParseExtraFiles will also add ldd-listed dependencies if lddDeps is true.
