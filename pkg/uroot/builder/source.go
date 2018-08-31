@@ -15,7 +15,14 @@ import (
 	"github.com/u-root/u-root/pkg/uroot/initramfs"
 )
 
-// SourceBuilder
+// SourceBuilder includes full source for Go commands in the initramfs.
+//
+// It also includes the Go toolchain in the initramfs, and a tool called
+// installcommand that can compile the other commands using symlinks.
+//
+// E.g. if "ls" is an included command, "ls" will be a symlink to
+// "installcommand" in the initramfs, which uses argv[0] to figure out which
+// command to compile.
 type SourceBuilder struct{}
 
 // DefaultBinaryDir implements Builder.DefaultBinaryDir.
