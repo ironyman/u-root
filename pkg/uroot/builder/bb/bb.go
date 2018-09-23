@@ -26,7 +26,6 @@ import (
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/imports"
 
-	"github.com/nightlyone/lockfile"
 	"github.com/u-root/u-root/pkg/golang"
 )
 
@@ -35,67 +34,17 @@ var skip = map[string]struct{}{
 	"bb": {},
 }
 
-func getBBLock(bblock string) (lockfile.Lockfile, error) {
-	secondsTimeout := 60
-	timer := time.After(time.Duration(secondsTimeout) * time.Second)
-	lock, err := lockfile.New(bblock)
-	if err != nil {
-		return lockfile.Lockfile(""), err
-	}
-	for {
-		select {
-		case <-timer:
-			return lockfile.Lockfile(""), fmt.Errorf("could not acquire bblock file %q: %d second deadline expired", bblock, secondsTimeout)
-		default:
-		}
-
-		switch err := lock.TryLock(); err {
-		case nil:
-			return lock, nil
-
-		case lockfile.ErrBusy, lockfile.ErrNotExist:
-			// This sucks. Use inotify.
-			time.Sleep(100 * time.Millisecond)
-
-		default:
-			return lockfile.Lockfile(""), err
-		}
-	}
-}
-
 // BuildBusybox builds a busybox of the given Go packages.
 //
 // pkgs is a list of Go import paths. If nil is returned, binaryPath will hold
 // the busybox-style binary.
 func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
-	urootPkg, err := env.Package("github.com/u-root/u-root")
+	buildDir, err := ioutil.TempDir("", time.Now().Format("uroot-build-20060102-150405"))
 	if err != nil {
 		return err
 	}
 
-	bblock := filepath.Join(urootPkg.Dir, "bblock")
-	// Only one busybox can be compiled at a time.
-	//
-	// Since busybox files all get rewritten in
-	// GOPATH/src/github.com/u-root/u-root/bb/..., no more than one source
-	// transformation can be in progress at the same time. Otherwise,
-	// different bb processes will write a different set of files to the
-	// "bb" directory at the same time, potentially producing an unintended
-	// bb binary.
-	//
-	// Doing each rewrite in a temporary unique directory is not an option
-	// as that kills reproducible builds.
-	l, err := getBBLock(bblock)
-	if err != nil {
-		return err
-	}
-	defer l.Unlock()
-
-	bbDir := filepath.Join(urootPkg.Dir, "bb")
-	// Blow bb away before trying to re-create it.
-	if err := os.RemoveAll(bbDir); err != nil {
-		return err
-	}
+	bbDir := filepath.Join(buildDir, "src/bb")
 	if err := os.MkdirAll(bbDir, 0755); err != nil {
 		return err
 	}
@@ -114,7 +63,7 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 			return err
 		}
 
-		bbPackages = append(bbPackages, fmt.Sprintf("github.com/u-root/u-root/bb/cmds/%s", path.Base(pkg)))
+		bbPackages = append(bbPackages, fmt.Sprintf("bb/cmds/%s", path.Base(pkg)))
 	}
 
 	bb, err := NewPackageFromEnv(env, "github.com/u-root/u-root/pkg/bb/cmd", importer)
@@ -132,8 +81,10 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 		return err
 	}
 
+	env.GOPATH = fmt.Sprintf("%s:%s", buildDir, env.GOPATH)
+
 	// Compile bb.
-	return env.Build("github.com/u-root/u-root/bb", binaryPath, golang.BuildOpts{})
+	return env.Build("bb", binaryPath, golang.BuildOpts{})
 }
 
 // CreateBBMainSource creates a bb Go command that imports all given pkgs.
