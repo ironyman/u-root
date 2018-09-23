@@ -114,7 +114,7 @@ type BuildOpts struct {
 
 // Build compiles the package given by `importPath`, writing the build object
 // to `binaryPath`.
-func (c Environ) Build(importPath string, binaryPath string, opts BuildOpts) error {
+func (c Environ) Build(importPath string, binaryPath string, opts *BuildOpts) error {
 	p, err := c.Package(importPath)
 	if err != nil {
 		return err
@@ -125,7 +125,7 @@ func (c Environ) Build(importPath string, binaryPath string, opts BuildOpts) err
 
 // BuildDir compiles the package in the directory `dirPath`, writing the build
 // object to `binaryPath`.
-func (c Environ) BuildDir(dirPath string, binaryPath string, opts BuildOpts) error {
+func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) error {
 	args := []string{
 		"build",
 		"-a", // Force rebuilding of packages.

@@ -83,7 +83,7 @@ func (SourceBuilder) Build(af *initramfs.Files, opts Opts) error {
 	if err := buildToolchain(opts); err != nil {
 		return err
 	}
-	if err := opts.Env.Build(installcommand, filepath.Join(opts.TempDir, opts.BinaryDir, "installcommand"), golang.BuildOpts{}); err != nil {
+	if err := opts.Env.Build(installcommand, filepath.Join(opts.TempDir, opts.BinaryDir, "installcommand"), nil); err != nil {
 		return err
 	}
 
@@ -95,7 +95,7 @@ func (SourceBuilder) Build(af *initramfs.Files, opts Opts) error {
 // asm.
 func buildToolchain(opts Opts) error {
 	goBin := filepath.Join(opts.TempDir, "go/bin/go")
-	tcbo := golang.BuildOpts{
+	tcbo := &golang.BuildOpts{
 		ExtraArgs: []string{"-tags", "cmd_go_bootstrap"},
 	}
 	if err := opts.Env.Build("cmd/go", goBin, tcbo); err != nil {
@@ -105,7 +105,7 @@ func buildToolchain(opts Opts) error {
 	toolDir := filepath.Join(opts.TempDir, fmt.Sprintf("go/pkg/tool/%v_%v", opts.Env.GOOS, opts.Env.GOARCH))
 	for _, pkg := range []string{"compile", "link", "asm"} {
 		c := filepath.Join(toolDir, pkg)
-		if err := opts.Env.Build(fmt.Sprintf("cmd/%s", pkg), c, golang.BuildOpts{}); err != nil {
+		if err := opts.Env.Build(fmt.Sprintf("cmd/%s", pkg), c, nil); err != nil {
 			return err
 		}
 	}

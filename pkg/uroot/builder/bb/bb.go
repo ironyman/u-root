@@ -84,7 +84,7 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 	env.GOPATH = fmt.Sprintf("%s:%s", buildDir, env.GOPATH)
 
 	// Compile bb.
-	return env.Build("bb", binaryPath, golang.BuildOpts{})
+	return env.Build("bb", binaryPath, nil)
 }
 
 // CreateBBMainSource creates a bb Go command that imports all given pkgs.
