@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 type Environ struct {
@@ -110,17 +111,40 @@ func (c Environ) String() string {
 type BuildOpts struct {
 	// ExtraArgs to `go build`.
 	ExtraArgs []string
+
+	FSRoot     string
+	WorkingDir string
 }
 
 // Build compiles the package given by `importPath`, writing the build object
 // to `binaryPath`.
 func (c Environ) Build(importPath string, binaryPath string, opts *BuildOpts) error {
-	p, err := c.Package(importPath)
-	if err != nil {
-		return err
+	args := []string{
+		"build",
+		"-a", // Force rebuilding of packages.
+		"-o", binaryPath,
+		"-installsuffix", "uroot",
+		"-ldflags", "-s -w", // Strip all symbols.
+	}
+	if opts != nil && opts.ExtraArgs != nil {
+		args = append(args, opts.ExtraArgs...)
+	}
+	args = append(args, importPath)
+
+	cmd := c.goCmd(args...)
+	if opts != nil && len(opts.FSRoot) > 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Chroot: opts.FSRoot,
+		}
+	}
+	if opts != nil && len(opts.WorkingDir) > 0 {
+		cmd.Dir = opts.WorkingDir
 	}
 
-	return c.BuildDir(p.Dir, binaryPath, opts)
+	if o, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("error building go package %q: %v, %v", importPath, string(o), err)
+	}
+	return nil
 }
 
 // BuildDir compiles the package in the directory `dirPath`, writing the build
@@ -133,13 +157,18 @@ func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) er
 		"-installsuffix", "uroot",
 		"-ldflags", "-s -w", // Strip all symbols.
 	}
-	if opts.ExtraArgs != nil {
+	if opts != nil && opts.ExtraArgs != nil {
 		args = append(args, opts.ExtraArgs...)
 	}
 	// We always set the working directory, so this is always '.'.
 	args = append(args, ".")
 
 	cmd := c.goCmd(args...)
+	if opts != nil && len(opts.FSRoot) != 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Chroot: opts.FSRoot,
+		}
+	}
 	cmd.Dir = dirPath
 
 	if o, err := cmd.CombinedOutput(); err != nil {

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/u-root/u-root/pkg/golang"
 	"github.com/u-root/u-root/pkg/uroot/initramfs"
 )
 

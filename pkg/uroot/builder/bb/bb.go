@@ -15,6 +15,7 @@ import (
 	"go/token"
 	"go/types"
 	"io/ioutil"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -27,6 +28,8 @@ import (
 	"golang.org/x/tools/imports"
 
 	"github.com/u-root/u-root/pkg/golang"
+
+	"github.com/otiai10/copy"
 )
 
 // Commands to skip building in bb mode.
@@ -39,13 +42,15 @@ var skip = map[string]struct{}{
 // pkgs is a list of Go import paths. If nil is returned, binaryPath will hold
 // the busybox-style binary.
 func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
-	buildDir, err := ioutil.TempDir("", time.Now().Format("uroot-build-20060102-150405"))
+	buildDir, err := ioutil.TempDir("", time.Now().Format("uroot-build-20060102-150405-"))
 	if err != nil {
 		return err
 	}
 
-	bbDir := filepath.Join(buildDir, "src/bb")
-	if err := os.MkdirAll(bbDir, 0755); err != nil {
+	srcDir := filepath.Join(buildDir, "src")
+	bbDir := filepath.Join(srcDir, "bb")
+	vendorDir := filepath.Join(bbDir, "vendor")
+	if err := os.MkdirAll(vendorDir, 0755); err != nil {
 		return err
 	}
 
@@ -57,13 +62,15 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 			continue
 		}
 
-		pkgDir := filepath.Join(bbDir, "cmds", path.Base(pkg))
+		//pkgDir := filepath.Join(bbDir, "cmds", path.Base(pkg))
+		pkgDir := filepath.Join(srcDir, pkg)
 		// TODO: use bbDir to derive import path below or vice versa.
-		if err := RewritePackage(env, pkg, pkgDir, "github.com/u-root/u-root/pkg/bb", importer); err != nil {
+		if err := RewritePackage(env, pkg, pkgDir, "github.com/u-root/u-root/pkg/bb", srcDir, importer); err != nil {
 			return err
 		}
 
-		bbPackages = append(bbPackages, fmt.Sprintf("bb/cmds/%s", path.Base(pkg)))
+		//bbPackages = append(bbPackages, fmt.Sprintf("bb/cmds/%s", path.Base(pkg)))
+		bbPackages = append(bbPackages, pkg)
 	}
 
 	bb, err := NewPackageFromEnv(env, "github.com/u-root/u-root/pkg/bb/cmd", importer)
@@ -81,7 +88,12 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 		return err
 	}
 
-	env.GOPATH = fmt.Sprintf("%s:%s", buildDir, env.GOPATH)
+	// "Vendor" github.com/u-root/u-root/pkg/bb.
+	if err := copy.Copy(filepath.Dir(bb.p.Dir), filepath.Join(srcDir, "github.com/u-root/u-root/pkg/bb")); err != nil {
+		return err
+	}
+
+	env.GOPATH = buildDir
 
 	// Compile bb.
 	return env.Build("bb", binaryPath, nil)
@@ -123,6 +135,8 @@ func CreateBBMainSource(fset *token.FileSet, astp *ast.Package, pkgs []string, d
 type Package struct {
 	name string
 
+	p *build.Package
+
 	fset        *token.FileSet
 	ast         *ast.Package
 	typeInfo    types.Info
@@ -135,6 +149,9 @@ type Package struct {
 	// init is the cmd.Init function that calls all other InitXs in the
 	// right order.
 	init *ast.FuncDecl
+
+	vendorDir        string
+	vendorImportPath string
 
 	// initAssigns is a map of assignment expression -> InitN function call
 	// statement.
@@ -199,6 +216,7 @@ func NewPackage(name string, p *build.Package, importer types.Importer) (*Packag
 	}
 
 	pp := &Package{
+		p:    p,
 		name: name,
 		fset: fset,
 		ast:  astp,
@@ -217,6 +235,18 @@ func NewPackage(name string, p *build.Package, importer types.Importer) (*Packag
 		},
 		Body: &ast.BlockStmt{},
 	}
+
+	candidateDir := p.Dir
+	for filepath.Clean(candidateDir) != filepath.Clean(p.SrcRoot) {
+		cand := filepath.Join(candidateDir, "vendor")
+		if _, err := os.Stat(cand); err == nil {
+			pp.vendorDir = cand
+			pp.vendorImportPath = strings.TrimPrefix(strings.TrimPrefix(pp.vendorDir, p.SrcRoot), "/")
+			break
+		}
+		candidateDir = filepath.Dir(candidateDir)
+	}
+	log.Printf("vendor dir: %s / %s", pp.vendorDir, pp.vendorImportPath)
 
 	// The order of types.Info.InitOrder depends on this list of files
 	// always being passed to conf.Check in the same order.
@@ -258,7 +288,7 @@ func (p *Package) nextInit(addToCallList bool) *ast.Ident {
 // TODO:
 // - write an init name generator, in case InitN is already taken.
 // - also rewrite all non-Go-stdlib dependencies.
-func (p *Package) rewriteFile(f *ast.File) bool {
+func (p *Package) rewriteFile(destDir, srcDir string, f *ast.File) bool {
 	hasMain := false
 
 	// Change the package name declaration from main to the command's name.
@@ -267,13 +297,28 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	// Map of fully qualified package name -> imported alias in the file.
 	importAliases := make(map[string]string)
 	for _, impt := range f.Imports {
+		importPath, err := strconv.Unquote(impt.Path.Value)
+		if err != nil {
+			panic(err)
+		}
+
 		if impt.Name != nil {
-			importPath, err := strconv.Unquote(impt.Path.Value)
-			if err != nil {
-				panic(err)
-			}
 			importAliases[importPath] = impt.Name.Name
 		}
+
+		// Check if it exists in the vendor directory of this package.
+		/*dir := filepath.Join(p.vendorDir, importPath)
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			// We ain't vendored. We're just in the GOPATH.
+			src := filepath.Join(p.p.SrcRoot, importPath)
+			log.Printf("src: %s to %s", src, filepath.Join(srcDir, importPath))
+			if _, err := os.Stat(src); err == nil {
+				if err := copy.Copy(src, filepath.Join(srcDir, importPath)); err != nil {
+					panic(err)
+				}
+			}
+		}*/
+
 	}
 
 	// When the types.TypeString function translates package names, it uses
@@ -294,50 +339,71 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
-			// We only care about vars.
-			if d.Tok != token.VAR {
-				break
-			}
+			switch d.Tok {
+			/*case token.IMPORT:
 			for _, spec := range d.Specs {
-				s := spec.(*ast.ValueSpec)
-				if s.Values == nil {
-					continue
+				s := spec.(*ast.ImportSpec)
+				importPath, err := strconv.Unquote(s.Path.Value)
+				if err != nil {
+					panic(err)
 				}
 
-				// For each assignment, create a new init
-				// function, and place it in the same file.
-				for i, name := range s.Names {
-					varInit := &ast.FuncDecl{
-						Name: p.nextInit(false),
-						Type: &ast.FuncType{
-							Params:  &ast.FieldList{},
-							Results: nil,
-						},
-						Body: &ast.BlockStmt{
-							List: []ast.Stmt{
-								&ast.AssignStmt{
-									Lhs: []ast.Expr{name},
-									Tok: token.ASSIGN,
-									Rhs: []ast.Expr{s.Values[i]},
+				// Check if it exists in the vendor directory of this package.
+				dir := filepath.Join(p.vendorDir, importPath)
+				if _, err := os.Stat(dir); err == nil {
+					// We are vendored. Doublevendor me.
+					//importPath := path.Join(path.Dir(p.vendorImportPath), "doublevendor", importPath)
+					// Change the import path in the file.
+					//s.Path.Value = strconv.Quote(importPath)
+
+					if err := copy.Copy(dir, filepath.Join(vendorDir, importPath)); err != nil {
+						panic(err)
+					}
+				}
+			}*/
+
+			case token.VAR:
+				for _, spec := range d.Specs {
+					s := spec.(*ast.ValueSpec)
+					if s.Values == nil {
+						continue
+					}
+
+					// For each assignment, create a new init
+					// function, and place it in the same file.
+					for i, name := range s.Names {
+						varInit := &ast.FuncDecl{
+							Name: p.nextInit(false),
+							Type: &ast.FuncType{
+								Params:  &ast.FieldList{},
+								Results: nil,
+							},
+							Body: &ast.BlockStmt{
+								List: []ast.Stmt{
+									&ast.AssignStmt{
+										Lhs: []ast.Expr{name},
+										Tok: token.ASSIGN,
+										Rhs: []ast.Expr{s.Values[i]},
+									},
 								},
 							},
-						},
+						}
+						// Add a call to the new init func to
+						// this map, so they can be added to
+						// Init0() in the correct init order
+						// later.
+						p.initAssigns[s.Values[i]] = &ast.ExprStmt{X: &ast.CallExpr{Fun: varInit.Name}}
+						f.Decls = append(f.Decls, varInit)
 					}
-					// Add a call to the new init func to
-					// this map, so they can be added to
-					// Init0() in the correct init order
-					// later.
-					p.initAssigns[s.Values[i]] = &ast.ExprStmt{X: &ast.CallExpr{Fun: varInit.Name}}
-					f.Decls = append(f.Decls, varInit)
-				}
 
-				// Add the type of the expression to the global
-				// declaration instead.
-				if s.Type == nil {
-					typ := p.typeInfo.Types[s.Values[0]]
-					s.Type = ast.NewIdent(types.TypeString(typ.Type, qualifier))
+					// Add the type of the expression to the global
+					// declaration instead.
+					if s.Type == nil {
+						typ := p.typeInfo.Types[s.Values[0]]
+						s.Type = ast.NewIdent(types.TypeString(typ.Type, qualifier))
+					}
+					s.Values = nil
 				}
-				s.Values = nil
 			}
 
 		case *ast.FuncDecl:
@@ -367,7 +433,7 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 // RewritePackage rewrites pkgPath to be bb-mode compatible, where destDir is
 // the file system destination of the written files and bbImportPath is the Go
 // import path of the bb package to register with.
-func RewritePackage(env golang.Environ, pkgPath, destDir, bbImportPath string, importer types.Importer) error {
+func RewritePackage(env golang.Environ, pkgPath, destDir, bbImportPath, srcDir string, importer types.Importer) error {
 	p, err := NewPackageFromEnv(env, pkgPath, importer)
 	if err != nil {
 		return err
@@ -375,13 +441,19 @@ func RewritePackage(env golang.Environ, pkgPath, destDir, bbImportPath string, i
 	if p == nil {
 		return nil
 	}
-	return p.Rewrite(destDir, bbImportPath)
+	return p.Rewrite(destDir, bbImportPath, srcDir)
 }
 
 // Rewrite rewrites p into destDir as a bb package using bbImportPath for the
 // bb implementation.
-func (p *Package) Rewrite(destDir, bbImportPath string) error {
+func (p *Package) Rewrite(destDir, bbImportPath, srcDir string) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return err
+	}
+
+	log.Printf("vendor: %s", filepath.Join(srcDir, p.vendorImportPath))
+
+	if err := copy.Copy(p.vendorDir, filepath.Join(srcDir, p.vendorImportPath)); err != nil {
 		return err
 	}
 
@@ -399,7 +471,7 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 
 	var mainFile *ast.File
 	for _, sourceFile := range p.sortedFiles {
-		if hasMainFile := p.rewriteFile(sourceFile); hasMainFile {
+		if hasMainFile := p.rewriteFile(destDir, srcDir, sourceFile); hasMainFile {
 			mainFile = sourceFile
 		}
 	}
