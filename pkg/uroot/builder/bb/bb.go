@@ -28,8 +28,6 @@ import (
 	"golang.org/x/tools/imports"
 
 	"github.com/u-root/u-root/pkg/golang"
-
-	"github.com/otiai10/copy"
 )
 
 // Commands to skip building in bb mode.
@@ -49,8 +47,7 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 
 	srcDir := filepath.Join(buildDir, "src")
 	bbDir := filepath.Join(srcDir, "bb")
-	vendorDir := filepath.Join(bbDir, "vendor")
-	if err := os.MkdirAll(vendorDir, 0755); err != nil {
+	if err := os.MkdirAll(bbDir, 0755); err != nil {
 		return err
 	}
 
@@ -88,12 +85,7 @@ func BuildBusybox(env golang.Environ, pkgs []string, binaryPath string) error {
 		return err
 	}
 
-	// "Vendor" github.com/u-root/u-root/pkg/bb.
-	if err := copy.Copy(filepath.Dir(bb.p.Dir), filepath.Join(srcDir, "github.com/u-root/u-root/pkg/bb")); err != nil {
-		return err
-	}
-
-	env.GOPATH = buildDir
+	env.GOPATH = fmt.Sprintf("%s:%s", buildDir, env.GOPATH)
 
 	// Compile bb.
 	return env.Build("bb", binaryPath, nil)
@@ -240,7 +232,13 @@ func NewPackage(name string, p *build.Package, importer types.Importer) (*Packag
 	for filepath.Clean(candidateDir) != filepath.Clean(p.SrcRoot) {
 		cand := filepath.Join(candidateDir, "vendor")
 		if _, err := os.Stat(cand); err == nil {
-			pp.vendorDir = cand
+			sym := filepath.Join(candidateDir, "u-root-vendor")
+			/*if err := os.Symlink(cand, sym); !os.IsNotExist(err) {
+				panic(err)
+			}*/
+
+			pp.vendorDir = sym
+
 			pp.vendorImportPath = strings.TrimPrefix(strings.TrimPrefix(pp.vendorDir, p.SrcRoot), "/")
 			break
 		}
@@ -305,20 +303,6 @@ func (p *Package) rewriteFile(destDir, srcDir string, f *ast.File) bool {
 		if impt.Name != nil {
 			importAliases[importPath] = impt.Name.Name
 		}
-
-		// Check if it exists in the vendor directory of this package.
-		/*dir := filepath.Join(p.vendorDir, importPath)
-		if _, err := os.Stat(dir); os.IsNotExist(err) {
-			// We ain't vendored. We're just in the GOPATH.
-			src := filepath.Join(p.p.SrcRoot, importPath)
-			log.Printf("src: %s to %s", src, filepath.Join(srcDir, importPath))
-			if _, err := os.Stat(src); err == nil {
-				if err := copy.Copy(src, filepath.Join(srcDir, importPath)); err != nil {
-					panic(err)
-				}
-			}
-		}*/
-
 	}
 
 	// When the types.TypeString function translates package names, it uses
@@ -340,27 +324,21 @@ func (p *Package) rewriteFile(destDir, srcDir string, f *ast.File) bool {
 		switch d := decl.(type) {
 		case *ast.GenDecl:
 			switch d.Tok {
-			/*case token.IMPORT:
-			for _, spec := range d.Specs {
-				s := spec.(*ast.ImportSpec)
-				importPath, err := strconv.Unquote(s.Path.Value)
-				if err != nil {
-					panic(err)
-				}
-
-				// Check if it exists in the vendor directory of this package.
-				dir := filepath.Join(p.vendorDir, importPath)
-				if _, err := os.Stat(dir); err == nil {
-					// We are vendored. Doublevendor me.
-					//importPath := path.Join(path.Dir(p.vendorImportPath), "doublevendor", importPath)
-					// Change the import path in the file.
-					//s.Path.Value = strconv.Quote(importPath)
-
-					if err := copy.Copy(dir, filepath.Join(vendorDir, importPath)); err != nil {
+			case token.IMPORT:
+				for _, spec := range d.Specs {
+					s := spec.(*ast.ImportSpec)
+					importPath, err := strconv.Unquote(s.Path.Value)
+					if err != nil {
 						panic(err)
 					}
+
+					// Check if it exists in the vendor directory of this package.
+					dir := filepath.Join(p.vendorDir, importPath)
+					if _, err := os.Stat(dir); err == nil {
+						// Change the import path in the file.
+						s.Path.Value = strconv.Quote(path.Join(p.vendorImportPath, importPath))
+					}
 				}
-			}*/
 
 			case token.VAR:
 				for _, spec := range d.Specs {
@@ -448,12 +426,6 @@ func RewritePackage(env golang.Environ, pkgPath, destDir, bbImportPath, srcDir s
 // bb implementation.
 func (p *Package) Rewrite(destDir, bbImportPath, srcDir string) error {
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-
-	log.Printf("vendor: %s", filepath.Join(srcDir, p.vendorImportPath))
-
-	if err := copy.Copy(p.vendorDir, filepath.Join(srcDir, p.vendorImportPath)); err != nil {
 		return err
 	}
 

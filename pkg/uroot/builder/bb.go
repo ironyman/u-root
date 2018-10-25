@@ -45,7 +45,7 @@ func (BBBuilder) Build(af *initramfs.Files, opts Opts) error {
 	// Build the busybox binary.
 	bbPath := filepath.Join(opts.TempDir, "bb")
 	if err := bb.BuildBusybox(opts.Env, opts.Packages, bbPath); err != nil {
-		return err
+		return fmt.Errorf("build busybox: %v", err)
 	}
 
 	if len(opts.BinaryDir) == 0 {
@@ -53,7 +53,7 @@ func (BBBuilder) Build(af *initramfs.Files, opts Opts) error {
 	}
 
 	if err := af.AddFile(bbPath, path.Join(opts.BinaryDir, "bb")); err != nil {
-		return err
+		return fmt.Errorf("adding file bb: %v", err)
 	}
 
 	// Add symlinks for included commands to initramfs.
