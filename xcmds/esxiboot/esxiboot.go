@@ -44,8 +44,10 @@ import (
 	"github.com/u-root/u-root/pkg/multiboot"
 )
 
-var cfg = flag.StringP("config", "c", "", "Set the ESXi config")
-var dev = flag.StringP("device", "d", "", "Set the ESXi boot device")
+var (
+	cfg = flag.StringP("config", "c", "", "Set the ESXi config")
+	dev = flag.StringP("device", "d", "", "Set the ESXi boot device")
+)
 
 const (
 	kernel  = "kernel"
@@ -110,6 +112,8 @@ func (o *options) addUUID(device string) error {
 }
 
 func parse(fname string) (options, error) {
+	dir := filepath.Dir(fname)
+
 	f, err := os.Open(fname)
 	if err != nil {
 		log.Fatal(err)
@@ -135,12 +139,12 @@ func parse(fname string) (options, error) {
 		val := strings.TrimSpace(tokens[1])
 		switch key {
 		case kernel:
-			opt.kernel = val
+			opt.kernel = filepath.Join(dir, val)
 		case args:
-			opt.args = val
+			opt.args = filepath.Join(dir, val)
 		case modules:
 			for _, tok := range strings.Split(val, sep) {
-				tok = strings.TrimSpace(tok)
+				tok = filepath.Join(dir, strings.TrimSpace(tok))
 				opt.modules = append(opt.modules, tok)
 			}
 		}
@@ -152,7 +156,7 @@ func parse(fname string) (options, error) {
 
 func main() {
 	flag.Parse()
-	if *cfg == "" {
+	if len(*cfg) == 0 {
 		log.Fatalf("Config cannot be empty")
 	}
 
