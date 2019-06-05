@@ -8,6 +8,7 @@ bazel-*
 
 /bbsh
 /bb
+.bb
 /u-root
 !vendor/github.com/u-root
 integration/serial/
@@ -55,3 +56,11 @@ vmlinux
 
 # Vim swap files
 *.swp
+localboot/localboot
+localboot/.bb
+netboot/netboot
+netboot/.bb
+cmds/vpdbootmanager/vpdbootmanager
+cmds/fixmynetboot/fixmynetboot
+uinit/uinit
+uinit/.bb
