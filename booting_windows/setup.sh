@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 set -euo pipefail
 
 # Path to a working Windows *raw* image:
@@ -34,8 +35,11 @@ echo "Extracting Windows Loader from Windows Image, requires sudo:"
 WINDOWS_LOADER=${EFI_WORKSPACE}/efi_fs/bootmgfw.efi
 
 # Loop device for mounting Windows image. You may want to run
-# `losetup --list` to see which device is available
-LOOP_DEVICE=loop4
+# `losetup --list` to see which device is available and paste one here.
+# Find first available, make sure nothing else is using losetup on this system.
+AVAILABLE=$(sudo losetup -f)
+LOOP_DEVICE=${AVAILABLE##*/}
+echo Using $LOOP_DEVICE
 
 if [[ ! -f "${WINDOWS_LOADER}" ]]; then
   sudo losetup "${LOOP_DEVICE}" "${WINDOWS_DISK}"  # Attach raw disk to loop1
@@ -48,7 +52,6 @@ if [[ ! -f "${WINDOWS_LOADER}" ]]; then
   sudo umount /mnt/win_disk
   sudo kpartx -d /dev/"${LOOP_DEVICE}"         # Remove /dev/mapper paritions
   sudo losetup -d /dev/"${LOOP_DEVICE}"        # Dettach WINDOWS_DISK
-
 else
   echo "NOTE: Windows loader already exists, " 1>&2
   echo "      no need to extract it again" 1>&2
@@ -67,4 +70,3 @@ make olddefconfig # populate config with default values which may be missing
 
 echo "Installing libelf-dev, may prompt for sudo password:"
 sudo apt-get install libelf-dev
-
